@@ -4,6 +4,8 @@ from collections import Counter
 import re
 from text_stats import TextStats
 
+from itertools import combinations
+
 letters = 'abcdefghijklmnopqrstuvwxyz'
 
 class Cracker:
@@ -27,10 +29,10 @@ class Cracker:
         """
         # Remove punctuation from self.enc_text:
         self.clean_enc_text = re.sub(r'[^\w\s]', '', self.enc_text)
-        self.enc_words = self.clean_enc_text.split()
+        self.enc_words_list = self.clean_enc_text.split()
 
         # Now count the words and letters:
-        self.enc_stats_df, self.enc_words_df = self.text_stats.calc_text_stats(self.enc_words)
+        self.enc_stats_df, self.enc_words_df = self.text_stats.calc_text_stats(self.enc_words_list)
         # Add a dict for the enc_words by count:
         self.enc_words = self.enc_words_df.cnt.to_dict()
 
@@ -81,7 +83,16 @@ class Cracker:
         # Check that the words we found are according to the stats - score on stats diff:
         found_top_words = sum([self.top_word_stats[w] for w in self.top_words if w.translate(enc_trans) in self.enc_words])
 
-        return n_found * found_top_words
+        # Check the percentage of letters with these letters that we have do appear in the top words:
+        enc_l_set = set(enc_dict.values())
+        enc_words_with_letters = {w for w in self.enc_words if all(l in enc_l_set for l in w)}
+        if len(enc_words_with_letters) == 0:
+            # No words found. This is not the right solution...
+            return 0
+        found_enc_words = {w for w in top_words_enc if w in enc_words_with_letters}
+        found_enc_ratio = sum(self.enc_words[l] for l in found_enc_words) / sum(self.enc_words[l] for l in enc_words_with_letters)
+
+        return n_found * found_top_words * found_enc_ratio
 
     def get_top_words(self, top_set):
         """
@@ -165,6 +176,57 @@ class Cracker:
         print(f"We tried {cnt} options and found best result")
         return dict(zip(top_letters, best))
 
+    def try_switch(self, enc_dict):
+        """
+        Score the existing enc_dict, then try to switch a pair of letters to improve the score.
+        We try to switch both a pair of letters in the letters we found, and one letter we found with an unused letter
+        :param enc_dict: A dict of letters we already cracked {plain_letter: enc_letter}
+        :return: A dict of letters we already cracked after the revision (if any made) {plain_letter: enc_letter}
+        """
+        # First try inside the letters in enc_dict:
+        score = self.score_option(enc_dict)
+        enc_dict_letters = list(enc_dict.keys())
+        replace = None
+
+        # Get all pairs of letters in enc_dict_letters:
+        for pair in combinations(enc_dict_letters, 2):
+            # Try to switch the letters:
+            orig_vals = (enc_dict[pair[0]], enc_dict[pair[1]])
+            enc_dict[pair[0]] = orig_vals[1]
+            enc_dict[pair[1]] = orig_vals[0]
+            new_score = self.score_option(enc_dict)
+            if new_score > score:
+                print(f"Found a better score with switch {pair}!")
+                score = new_score
+                replace = ('in', pair[0], pair[1])
+            # Put the letter back:
+            enc_dict[pair[0]] = orig_vals[0]
+            enc_dict[pair[1]] = orig_vals[1]
+
+        # Now try to replace the enc_letters (the values in the dict) with the letters we don't know:
+        unused_letters = [l for l in letters if l not in enc_dict.values()]
+        for enc_l in enc_dict.keys():
+            for l in unused_letters:
+                orig_l = enc_dict[enc_l]
+                enc_dict[enc_l] = l
+                new_score = self.score_option(enc_dict)
+                if new_score > score:
+                    print(f"Found a better score with switch {l}!")
+                    score = new_score
+                    replace = ('out', enc_l, l)
+                # Put the letter back:
+                enc_dict[enc_l] = orig_l
+
+        if replace:
+            print(f"We replaced {replace[1]} with {replace[2]} in mode {replace[0]}")
+            if replace[0]=='in':
+                orig_vals = (enc_dict[replace[1]], enc_dict[replace[2]])
+                enc_dict[replace[1]] = orig_vals[1]
+                enc_dict[replace[2]] = orig_vals[0]
+            elif replace[0]=='out':
+                enc_dict[replace[1]] = replace[2]
+        return enc_dict
+
     def crack_code(self, group_sizes=5, n_top=5, n_mult=3):
         """
         Crack the code iteratively. In each round we crack the next group_size letters. We also increase the
@@ -203,6 +265,10 @@ class Cracker:
                 round_res = self.crack_letters(next_letters, n_top[k]*3, n_mult[k]*10, enc_dict)
 
             enc_dict.update(round_res)
+
+            # Try to switch one pair of letters:
+            enc_dict = self.try_switch(enc_dict)
+
         return enc_dict
 
     def decipher(self, enc_dict):
@@ -217,9 +283,9 @@ class Cracker:
 
 if __name__ == '__main__':
     cr = Cracker('Data/cipher.txt')
-    group_sizes = [10, 5, 5, 6]
-    n_top = [5, 8, 6, 6]
-    n_mult = [3, 20, 10, 1000]
+    group_sizes = [7, 7, 7, 5]
+    n_top = [5, 6, 6, 6]
+    n_mult = [3, 6, 10, 1000]
     enc_res = cr.crack_code(group_sizes, n_top, n_mult)
 
     # Print the decipher:
