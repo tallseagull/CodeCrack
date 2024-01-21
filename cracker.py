@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 import numpy as np
 from collections import Counter
@@ -282,13 +284,32 @@ class Cracker:
 
 
 if __name__ == '__main__':
-    cr = Cracker('Data/cipher.txt')
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-e', '--enc_file', default="Data/cipher.txt", help='Encrypted text file')
+    parser.add_argument('-d', '--dec_file', default="Data/out.txt", help='Decrypted text output file')
+    parser.add_argument('-k', '--key_file', default=None, help='Key file to write the result decrypt key to')
+    args = parser.parse_args()
+
+    cr = Cracker(args.enc_file)
     group_sizes = [7, 7, 7, 5]
     n_top = [5, 6, 6, 6]
     n_mult = [3, 6, 10, 1000]
     enc_res = cr.crack_code(group_sizes, n_top, n_mult)
 
     # Print the decipher:
-    print(cr.decipher(enc_res))
+    dec_text = cr.decipher(enc_res)
+    print(dec_text)
+
+    if args.key_file:
+        with open(args.key_file, 'w') as f:
+            f.write(json.dumps(enc_res))
+        print(f"Wrote key to {args.key_file}")
+
+    if args.dec_file:
+        with open(args.dec_file, 'w') as f:
+            f.write(dec_text)
+        print(f"Wrote decipher to {args.dec_file}")
 
 
